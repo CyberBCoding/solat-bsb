@@ -1,321 +1,436 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!--
+  ╔══════════════════════════════════════════════════════╗
+  ║  Solat BSB — Prayer Time Alarm                       ║
+  ║  Location : Bandar Seri Begawan, Brunei              ║
+  ║  Method   : JAKIM (Fajr 20°, Isha 18°)              ║
+  ║  Includes : Dhuha (sunnah), all 5 fard prayers       ║
+  ╚══════════════════════════════════════════════════════╝
+
+  HOW THIS FILE IS STRUCTURED
+  ─────────────────────────────
+  1. <head>       — page settings, fonts, PWA manifest link
+  2. <style>      — all visual styling (colours, layout, cards)
+  3. <body>       — the visible HTML elements
+  4. <script>     — all the logic (calculation, clock, alarms)
+
+  Inside <script>, sections are:
+    A. PRAYER DEFINITIONS   — the list of prayers with names/icons
+    B. LOCATION & OFFSETS   — coordinates and your time corrections
+    C. PRAYER CALCULATION   — the JAKIM astronomical math
+    D. OFFSET APPLICATION   — applies your corrections to raw times
+    E. RENDER FUNCTIONS     — draws the prayer list and offset panel
+    F. CLOCK                — the live ticking clock + alarm trigger
+    G. ALARM                — plays chime and shows the modal popup
+    H. CONTROLS             — toggle and offset +/- button handlers
+    I. INIT                 — runs everything on page load
+-->
+
+<!-- ── Page & PWA settings ── -->
 <meta charset="UTF-8">
+<!-- viewport: makes it fill the phone screen properly, no zoom -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<!-- theme-color: colours the browser top bar on Android -->
 <meta name="theme-color" content="#0b1120">
+<!-- apple tags: needed for "Add to Home Screen" on iPhone -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Solat BSB">
 <title>Solat BSB</title>
+<!-- manifest.json tells the browser this is an installable PWA -->
 <link rel="manifest" href="manifest.json">
+<!-- Google Fonts: Amiri = Arabic-style serif, DM Sans = clean body text -->
 <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+
 <style>
+/*
+  ══════════════════════════════════════════
+  CSS VARIABLES (Design Tokens)
+  ══════════════════════════════════════════
+  These are like named colours/values you
+  can reuse everywhere. Change them here
+  and the whole app updates automatically.
+
+  To change a colour: edit the hex value
+  e.g. --gold: #d4a843  →  --gold: #ff0000
+*/
 :root {
-  --bg:       #0b1120;
-  --bg2:      #111827;
-  --card:     #161f30;
-  --border:   #1e2d45;
-  --gold:     #d4a843;
-  --gold2:    #f0cc7a;
-  --teal:     #1a7a6e;
-  --teal2:    #25b09e;
-  --text:     #e8e0d0;
-  --dim:      #6b7fa0;
-  --next-bg:  #0f2a24;
-  --next-bdr: #1c4f43;
-  --ring:     #e05c2a;
+  --bg:       #0b1120;   /* main page background (dark navy) */
+  --bg2:      #111827;   /* slightly lighter background (modal) */
+  --card:     #161f30;   /* card/row background */
+  --border:   #1e2d45;   /* subtle border lines */
+  --gold:     #d4a843;   /* primary gold accent */
+  --gold2:    #f0cc7a;   /* brighter gold (active/next prayer) */
+  --teal:     #1a7a6e;   /* toggle on-state colour */
+  --teal2:    #25b09e;   /* brighter teal (next pill, offset notes) */
+  --text:     #e8e0d0;   /* main readable text */
+  --dim:      #6b7fa0;   /* muted/secondary text */
+  --next-bg:  #0f2a24;   /* green-tinted bg for the next prayer row */
+  --next-bdr: #1c4f43;   /* border for next prayer row */
+  --ring:     #e05c2a;   /* orange — used when alarm is ringing */
+  --sunnah:   #1a2a45;   /* slightly different bg for sunnah (Dhuha) row */
+  --sunnah-bdr: #263d60; /* border for sunnah row */
 }
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow-x:hidden}
-body{
-  background:var(--bg);
-  color:var(--text);
-  font-family:'DM Sans',sans-serif;
-  min-height:100vh;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
+
+/* ── Reset & Base ─────────────────────────────────────────────
+   Removes default browser spacing and makes sizing consistent */
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent }
+html, body { height:100%; overflow-x:hidden }
+
+/* ── Body layout ──────────────────────────────────────────────
+   Everything is centered in a column down the page.
+   The background-image adds subtle glow effects. */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Two soft radial glows: teal at top, gold at bottom */
   background-image:
     radial-gradient(ellipse 80% 40% at 50% -10%, rgba(26,122,110,0.18) 0%, transparent 70%),
     radial-gradient(ellipse 60% 30% at 80% 110%, rgba(212,168,67,0.08) 0%, transparent 60%);
 }
 
-/* ── Header ── */
-.header{
-  width:100%;
-  max-width:480px;
-  padding:48px 24px 0;
-  text-align:center;
+/* ══════════════════════════════════════════
+   HEADER  (app title and location)
+   ══════════════════════════════════════════
+   To move header up/down: change padding-top (currently 48px)
+   To change title text: edit the <h1> in the HTML below */
+.header {
+  width: 100%;
+  max-width: 480px;   /* caps width on large screens */
+  padding: 48px 24px 0;
+  text-align: center;
 }
-.crescent{
-  font-size:2.2rem;
-  margin-bottom:8px;
-  display:block;
-  filter:drop-shadow(0 0 12px rgba(212,168,67,0.5));
+.crescent {
+  font-size: 2.2rem;
+  margin-bottom: 8px;
+  display: block;
+  /* glowing drop shadow around the ☪️ emoji */
+  filter: drop-shadow(0 0 12px rgba(212,168,67,0.5));
 }
-.header h1{
-  font-family:'Amiri',serif;
-  font-size:2rem;
-  color:var(--gold2);
-  letter-spacing:0.03em;
+.header h1 {
+  font-family: 'Amiri', serif;
+  font-size: 2rem;
+  color: var(--gold2);
+  letter-spacing: 0.03em;
 }
-.header .loc{
-  font-size:0.75rem;
-  color:var(--dim);
-  letter-spacing:0.14em;
-  text-transform:uppercase;
-  margin-top:4px;
-}
-
-/* ── Clock card ── */
-.clock-card{
-  width:calc(100% - 32px);
-  max-width:480px;
-  margin:24px 16px 0;
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:20px;
-  padding:20px 24px;
-  position:relative;
-  overflow:hidden;
-}
-.clock-card::before{
-  content:'';
-  position:absolute;
-  top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,var(--gold),transparent);
-}
-.clock-time{
-  font-family:'Amiri',serif;
-  font-size:clamp(3rem,14vw,4rem);
-  color:var(--gold2);
-  line-height:1;
-  text-align:center;
-}
-.clock-date{
-  text-align:center;
-  font-size:0.8rem;
-  color:var(--dim);
-  margin-top:4px;
-  letter-spacing:0.06em;
-}
-.next-pill{
-  margin-top:14px;
-  background:var(--next-bg);
-  border:1px solid var(--next-bdr);
-  border-radius:40px;
-  padding:8px 16px;
-  display:flex;
-  align-items:center;
-  gap:10px;
-  font-size:0.82rem;
-}
-.next-label{color:var(--dim);white-space:nowrap}
-.next-name{color:var(--teal2);font-weight:500;flex:1}
-.next-countdown{
-  font-family:'Amiri',serif;
-  font-size:1rem;
-  color:var(--gold);
-  white-space:nowrap;
+.header .loc {
+  font-size: 0.75rem;
+  color: var(--dim);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-top: 4px;
 }
 
-/* ── Prayer list ── */
-.prayers{
-  width:calc(100% - 32px);
-  max-width:480px;
-  margin:20px 16px 0;
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-.prayer-row{
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:14px;
-  padding:14px 16px;
-  display:flex;
-  align-items:center;
-  gap:14px;
-  transition:border-color 0.25s, background 0.25s;
-  position:relative;
-  overflow:hidden;
-}
-.prayer-row.is-next{
-  background:var(--next-bg);
-  border-color:var(--next-bdr);
-}
-.prayer-row.is-next::before{
-  content:'';
-  position:absolute;
-  left:0;top:0;bottom:0;width:3px;
-  background:var(--teal2);
-  border-radius:3px 0 0 3px;
-}
-.prayer-row.is-past{opacity:0.45}
-.prayer-row.ringing{
-  border-color:var(--ring) !important;
-  animation:ringBorder 0.8s ease-in-out infinite;
-}
-@keyframes ringBorder{
-  0%,100%{box-shadow:0 0 0 0 rgba(224,92,42,0.4)}
-  50%{box-shadow:0 0 0 6px rgba(224,92,42,0)}
-}
-.p-icon{font-size:1.6rem;width:36px;text-align:center;flex-shrink:0}
-.p-info{flex:1;min-width:0}
-.p-name{font-weight:500;font-size:0.95rem;color:var(--text)}
-.p-arabic{font-family:'Amiri',serif;font-size:0.8rem;color:var(--dim);margin-top:1px}
-.p-offset{font-size:0.7rem;color:var(--teal2);margin-top:2px}
-.p-time{
-  font-family:'Amiri',serif;
-  font-size:1.45rem;
-  color:var(--gold);
-  text-align:right;
-  white-space:nowrap;
-}
-.is-next .p-time{color:var(--gold2)}
+/* ══════════════════════════════════════════
+   CLOCK CARD  (live time display)
+   ══════════════════════════════════════════
+   To move the clock: cut the <div class="clock-card"> block
+   in the HTML and paste it wherever you want in the page.
 
-/* toggle */
-.tog{position:relative;width:42px;height:23px;cursor:pointer;flex-shrink:0}
-.tog input{opacity:0;width:0;height:0}
-.tog-track{position:absolute;inset:0;background:var(--border);border-radius:12px;transition:background .2s}
-.tog input:checked+.tog-track{background:var(--teal)}
-.tog-thumb{position:absolute;top:3px;left:3px;width:17px;height:17px;background:#fff;border-radius:50%;transition:transform .2s}
-.tog input:checked~.tog-thumb{transform:translateX(19px)}
-
-/* ── Offset settings ── */
-.settings{
-  width:calc(100% - 32px);
-  max-width:480px;
-  margin:16px 16px 0;
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:16px;
-  padding:16px 18px;
+   To resize the clock digits: change font-size in .clock-time
+   clamp(min, preferred, max) — e.g. clamp(2rem, 14vw, 4rem) */
+.clock-card {
+  width: calc(100% - 32px);  /* full width minus 16px each side */
+  max-width: 480px;
+  margin: 24px 16px 0;       /* ← top margin: distance from header */
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 20px 24px;
+  position: relative;
+  overflow: hidden;
 }
-.settings-title{
-  font-size:0.72rem;
-  letter-spacing:0.16em;
-  text-transform:uppercase;
-  color:var(--dim);
-  margin-bottom:12px;
+/* Decorative thin gold line at top of card */
+.clock-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
 }
-.offset-row{
-  display:flex;
-  align-items:center;
-  gap:12px;
-  margin-bottom:10px;
+.clock-time {
+  font-family: 'Amiri', serif;
+  font-size: clamp(3rem, 14vw, 4rem);  /* responsive size */
+  color: var(--gold2);
+  line-height: 1;
+  text-align: center;
 }
-.offset-row:last-child{margin-bottom:0}
-.offset-label{font-size:0.88rem;flex:1}
-.offset-note{font-size:0.72rem;color:var(--teal2)}
-.offset-ctrl{
-  display:flex;
-  align-items:center;
-  gap:6px;
+.clock-date {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--dim);
+  margin-top: 4px;
+  letter-spacing: 0.06em;
 }
-.offset-btn{
-  background:var(--bg2);
-  border:1px solid var(--border);
-  color:var(--text);
-  width:30px;height:30px;
-  border-radius:8px;
-  font-size:1.1rem;
-  cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:border-color .15s;
+/* The "Next: Zohor in 2h 15m" pill inside the clock card */
+.next-pill {
+  margin-top: 14px;
+  background: var(--next-bg);
+  border: 1px solid var(--next-bdr);
+  border-radius: 40px;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
 }
-.offset-btn:hover{border-color:var(--gold)}
-.offset-val{
-  font-family:'Amiri',serif;
-  font-size:1rem;
-  color:var(--gold);
-  width:48px;
-  text-align:center;
+.next-label   { color: var(--dim); white-space: nowrap }
+.next-name    { color: var(--teal2); font-weight: 500; flex: 1 }
+.next-countdown {
+  font-family: 'Amiri', serif;
+  font-size: 1rem;
+  color: var(--gold);
+  white-space: nowrap;
 }
 
-/* ── Ring modal ── */
-.modal{
-  display:none;
-  position:fixed;inset:0;
-  background:rgba(0,0,0,0.85);
-  z-index:200;
-  align-items:center;justify-content:center;
-  padding:24px;
+/* ══════════════════════════════════════════
+   PRAYER ROWS  (the main list)
+   ══════════════════════════════════════════
+   Each prayer is one .prayer-row div.
+   Classes added dynamically by JavaScript:
+     .is-next  → highlighted green (upcoming prayer)
+     .is-past  → faded out (already passed today)
+     .ringing  → orange pulse (alarm going off)
+     .sunnah   → subtle blue tint (Dhuha row) */
+.prayers {
+  width: calc(100% - 32px);
+  max-width: 480px;
+  margin: 20px 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;   /* space between rows */
 }
-.modal.show{display:flex}
-.modal-box{
-  background:var(--bg2);
-  border:1px solid var(--ring);
-  border-radius:28px;
-  padding:40px 28px;
-  text-align:center;
-  max-width:300px;width:100%;
-  animation:popIn .3s cubic-bezier(.34,1.56,.64,1);
-  box-shadow:0 0 60px rgba(224,92,42,0.2);
+.prayer-row {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: border-color 0.25s, background 0.25s;
+  position: relative;
+  overflow: hidden;
 }
-@keyframes popIn{from{transform:scale(.8);opacity:0}to{transform:scale(1);opacity:1}}
-.modal-icon{font-size:3.5rem;animation:sway .7s ease-in-out infinite}
-@keyframes sway{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(10deg)}}
-.modal-prayer{
-  font-family:'Amiri',serif;
-  font-size:1.9rem;
-  color:var(--gold2);
-  margin:12px 0 2px;
+/* Next prayer: green background */
+.prayer-row.is-next {
+  background: var(--next-bg);
+  border-color: var(--next-bdr);
 }
-.modal-arabic{font-family:'Amiri',serif;font-size:1rem;color:var(--dim);margin-bottom:4px}
-.modal-time{font-size:0.9rem;color:var(--dim);margin-bottom:24px}
-.btn-dismiss{
-  width:100%;
-  padding:13px;
-  background:var(--ring);
-  color:#fff;
-  border:none;
-  border-radius:14px;
-  font-family:'DM Sans',sans-serif;
-  font-size:1rem;
-  font-weight:500;
-  cursor:pointer;
-  transition:opacity .2s;
+/* Green left accent bar on the next prayer */
+.prayer-row.is-next::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--teal2);
+  border-radius: 3px 0 0 3px;
 }
-.btn-dismiss:hover{opacity:.85}
+/* Sunnah prayer (Dhuha): slightly different background */
+.prayer-row.sunnah {
+  background: var(--sunnah);
+  border-color: var(--sunnah-bdr);
+}
+/* Past prayers: faded */
+.prayer-row.is-past { opacity: 0.45 }
+/* Ringing: orange border with pulsing shadow */
+.prayer-row.ringing {
+  border-color: var(--ring) !important;
+  animation: ringBorder 0.8s ease-in-out infinite;
+}
+@keyframes ringBorder {
+  0%,100% { box-shadow: 0 0 0 0 rgba(224,92,42,0.4) }
+  50%      { box-shadow: 0 0 0 6px rgba(224,92,42,0) }
+}
+/* Parts inside each prayer row */
+.p-icon   { font-size: 1.6rem; width: 36px; text-align: center; flex-shrink: 0 }
+.p-info   { flex: 1; min-width: 0 }
+.p-name   { font-weight: 500; font-size: 0.95rem; color: var(--text) }
+.p-arabic { font-family: 'Amiri', serif; font-size: 0.8rem; color: var(--dim); margin-top: 1px }
+/* Small note showing raw vs adjusted time (only for offset prayers) */
+.p-offset { font-size: 0.7rem; color: var(--teal2); margin-top: 2px }
+/* The time displayed on the right of each row */
+.p-time {
+  font-family: 'Amiri', serif;
+  font-size: 1.45rem;
+  color: var(--gold);
+  text-align: right;
+  white-space: nowrap;
+}
+/* Next prayer time is brighter */
+.is-next .p-time { color: var(--gold2) }
 
-/* ── Install banner ── */
-.install-bar{
-  width:calc(100% - 32px);
-  max-width:480px;
-  margin:14px 16px 32px;
-  background:rgba(26,122,110,0.12);
-  border:1px solid rgba(37,176,158,0.25);
-  border-radius:12px;
-  padding:12px 16px;
-  font-size:0.8rem;
-  color:var(--teal2);
-  text-align:center;
-  line-height:1.5;
-}
-.install-bar strong{display:block;margin-bottom:2px;font-size:0.85rem}
+/* ── Toggle switch (on/off alarm per prayer) ─────────────────
+   The toggle is a hidden checkbox styled to look like a switch.
+   The track is the background pill; the thumb is the circle. */
+.tog { position: relative; width: 42px; height: 23px; cursor: pointer; flex-shrink: 0 }
+.tog input { opacity: 0; width: 0; height: 0 }
+.tog-track { position: absolute; inset: 0; background: var(--border); border-radius: 12px; transition: background .2s }
+.tog input:checked + .tog-track { background: var(--teal) }
+.tog-thumb { position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; background: #fff; border-radius: 50%; transition: transform .2s }
+.tog input:checked ~ .tog-thumb { transform: translateX(19px) }
 
-.footer{
-  margin:0 16px 32px;
-  font-size:0.72rem;
-  color:var(--dim);
-  text-align:center;
-  opacity:0.6;
+/* ══════════════════════════════════════════
+   SETTINGS PANEL  (time correction offsets)
+   ══════════════════════════════════════════
+   To add a new offset prayer: copy one .offset-row block
+   in the HTML and update the label and onclick values. */
+.settings {
+  width: calc(100% - 32px);
+  max-width: 480px;
+  margin: 16px 16px 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+}
+.settings-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 12px;
+}
+/* Each row in the settings panel */
+.offset-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.offset-row:last-child { margin-bottom: 0 }
+.offset-label { font-size: 0.88rem; flex: 1 }
+/* The small "Calculated: X → Y" text under the label */
+.offset-note  { font-size: 0.72rem; color: var(--teal2) }
+/* The − value + control group */
+.offset-ctrl  { display: flex; align-items: center; gap: 6px }
+.offset-btn {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color .15s;
+}
+.offset-btn:hover { border-color: var(--gold) }
+/* The number shown between − and + */
+.offset-val {
+  font-family: 'Amiri', serif;
+  font-size: 1rem;
+  color: var(--gold);
+  width: 52px;
+  text-align: center;
+}
+
+/* ══════════════════════════════════════════
+   RING MODAL  (popup when alarm fires)
+   ══════════════════════════════════════════
+   Hidden by default. JavaScript adds .show
+   class when an alarm triggers. */
+.modal {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 200;
+  align-items: center; justify-content: center;
+  padding: 24px;
+}
+.modal.show { display: flex }
+.modal-box {
+  background: var(--bg2);
+  border: 1px solid var(--ring);
+  border-radius: 28px;
+  padding: 40px 28px;
+  text-align: center;
+  max-width: 300px; width: 100%;
+  /* Springy pop-in animation */
+  animation: popIn .3s cubic-bezier(.34,1.56,.64,1);
+  box-shadow: 0 0 60px rgba(224,92,42,0.2);
+}
+@keyframes popIn { from { transform: scale(.8); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+/* Swaying emoji icon in the modal */
+.modal-icon   { font-size: 3.5rem; animation: sway .7s ease-in-out infinite }
+@keyframes sway { 0%,100% { transform: rotate(-10deg) } 50% { transform: rotate(10deg) } }
+.modal-prayer { font-family: 'Amiri', serif; font-size: 1.9rem; color: var(--gold2); margin: 12px 0 2px }
+.modal-arabic { font-family: 'Amiri', serif; font-size: 1rem; color: var(--dim); margin-bottom: 4px }
+.modal-time   { font-size: 0.9rem; color: var(--dim); margin-bottom: 24px }
+.btn-dismiss {
+  width: 100%;
+  padding: 13px;
+  background: var(--ring);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1rem; font-weight: 500;
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.btn-dismiss:hover { opacity: .85 }
+
+/* ── Install hint & footer ────────────────────────────────── */
+.install-bar {
+  width: calc(100% - 32px);
+  max-width: 480px;
+  margin: 14px 16px 0;
+  background: rgba(26,122,110,0.12);
+  border: 1px solid rgba(37,176,158,0.25);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  color: var(--teal2);
+  text-align: center;
+  line-height: 1.5;
+}
+.install-bar strong { display: block; margin-bottom: 2px; font-size: 0.85rem }
+.footer {
+  margin: 14px 16px 36px;
+  font-size: 0.72rem;
+  color: var(--dim);
+  text-align: center;
+  opacity: 0.6;
 }
 </style>
 </head>
 <body>
 
+<!--
+  ══════════════════════════════════════════
+  HTML STRUCTURE
+  ══════════════════════════════════════════
+  The page is built in this order (top to bottom):
+    1. Header      — title + location
+    2. Clock card  — live time + next prayer pill
+    3. Prayer list — rendered by JavaScript
+    4. Settings    — offset controls
+    5. Install bar — PWA instructions
+    6. Modal       — alarm popup (hidden until triggered)
+-->
+
+<!-- 1. HEADER ─────────────────────────────────────────────────
+     To change the app title: edit the text inside <h1>
+     To change the location label: edit the text in .loc -->
 <div class="header">
   <span class="crescent">☪️</span>
   <h1>Solat BSB</h1>
   <p class="loc">Bandar Seri Begawan · Brunei</p>
 </div>
 
+<!-- 2. CLOCK CARD ─────────────────────────────────────────────
+     Move this entire block to reposition the clock on the page.
+     clockTime and clockDate are filled by the tick() function. -->
 <div class="clock-card">
   <div class="clock-time" id="clockTime">00:00:00</div>
   <div class="clock-date" id="clockDate"></div>
+  <!-- Next prayer pill: updated every minute -->
   <div class="next-pill">
     <span class="next-label">Next</span>
     <span class="next-name" id="nextName">—</span>
@@ -323,10 +438,19 @@ body{
   </div>
 </div>
 
+<!-- 3. PRAYER LIST ────────────────────────────────────────────
+     This div is empty here — JavaScript fills it via renderPrayers() -->
 <div class="prayers" id="prayerList"></div>
 
+<!-- 4. SETTINGS — Time Correction Offsets ────────────────────
+     Each .offset-row is one adjustable prayer.
+     changeOffset('key', delta) is called by the − and + buttons.
+     'key' must match the key used in the PRAYERS array in JS.
+     delta is +1 or -1 minute per button press. -->
 <div class="settings">
-  <div class="settings-title">⚙ Time Corrections</div>
+  <div class="settings-title">⚙ Time Corrections (minutes)</div>
+
+  <!-- Fajr / Subuh offset row -->
   <div class="offset-row">
     <div class="offset-label">
       Fajr (Subuh)
@@ -338,126 +462,267 @@ body{
       <button class="offset-btn" onclick="changeOffset('fajr',+1)">+</button>
     </div>
   </div>
+
+  <!-- Dhuha offset row (sunnah prayer, ~20 min after sunrise) -->
   <div class="offset-row">
     <div class="offset-label">
-      Isya'
-      <div class="offset-note" id="isyaNote"></div>
+      Dhuha (Sunnah)
+      <div class="offset-note" id="dhuhaNote"></div>
     </div>
     <div class="offset-ctrl">
-      <button class="offset-btn" onclick="changeOffset('isya',-1)">−</button>
-      <div class="offset-val" id="isyaVal"></div>
-      <button class="offset-btn" onclick="changeOffset('isya',+1)">+</button>
+      <button class="offset-btn" onclick="changeOffset('dhuha',-1)">−</button>
+      <div class="offset-val" id="dhuhaVal"></div>
+      <button class="offset-btn" onclick="changeOffset('dhuha',+1)">+</button>
+    </div>
+  </div>
+
+  <!-- Dhuhr / Zohor offset row -->
+  <div class="offset-row">
+    <div class="offset-label">
+      Dhuhr (Zohor)
+      <div class="offset-note" id="dhuhrNote"></div>
+    </div>
+    <div class="offset-ctrl">
+      <button class="offset-btn" onclick="changeOffset('dhuhr',-1)">−</button>
+      <div class="offset-val" id="dhuhrVal"></div>
+      <button class="offset-btn" onclick="changeOffset('dhuhr',+1)">+</button>
+    </div>
+  </div>
+
+  <!-- Asr offset row -->
+  <div class="offset-row">
+    <div class="offset-label">
+      Asr
+      <div class="offset-note" id="asrNote"></div>
+    </div>
+    <div class="offset-ctrl">
+      <button class="offset-btn" onclick="changeOffset('asr',-1)">−</button>
+      <div class="offset-val" id="asrVal"></div>
+      <button class="offset-btn" onclick="changeOffset('asr',+1)">+</button>
+    </div>
+  </div>
+
+  <!-- Maghrib offset row -->
+  <div class="offset-row">
+    <div class="offset-label">
+      Maghrib
+      <div class="offset-note" id="maghribNote"></div>
+    </div>
+    <div class="offset-ctrl">
+      <button class="offset-btn" onclick="changeOffset('maghrib',-1)">−</button>
+      <div class="offset-val" id="maghribVal"></div>
+      <button class="offset-btn" onclick="changeOffset('maghrib',+1)">+</button>
+    </div>
+  </div>
+
+  <!-- Isha / Isya' offset row -->
+  <div class="offset-row">
+    <div class="offset-label">
+      Isha' (Isya')
+      <div class="offset-note" id="ishaNote"></div>
+    </div>
+    <div class="offset-ctrl">
+      <button class="offset-btn" onclick="changeOffset('isha',-1)">−</button>
+      <div class="offset-val" id="ishaVal"></div>
+      <button class="offset-btn" onclick="changeOffset('isha',+1)">+</button>
     </div>
   </div>
 </div>
 
+<!-- 5. INSTALL BAR ────────────────────────────────────────────
+     Instructions for adding the app to home screen -->
 <div class="install-bar">
   <strong>📲 Install as App</strong>
-  In your browser: tap <strong>Share → Add to Home Screen</strong> (iOS) or the install icon in the address bar (Android Chrome)
+  Android Chrome: tap ⋮ menu → <strong>Add to Home Screen</strong><br>
+  iOS Safari: tap Share → <strong>Add to Home Screen</strong>
 </div>
+<div class="footer">Keep this tab open for alarms · JAKIM method · BSB coords</div>
 
-<div class="footer">Keep this page open for alarms to ring · Calculated via JAKIM method</div>
-
-<!-- Ring modal -->
+<!-- 6. RING MODAL ─────────────────────────────────────────────
+     Hidden until an alarm fires. JavaScript adds class "show"
+     to display it, and removes it when Dismiss is tapped. -->
 <div class="modal" id="modal">
   <div class="modal-box">
-    <div class="modal-icon" id="modalIcon">🕌</div>
+    <div class="modal-icon"   id="modalIcon">🕌</div>
     <div class="modal-prayer" id="modalPrayer"></div>
     <div class="modal-arabic" id="modalArabic"></div>
-    <div class="modal-time" id="modalTime"></div>
+    <div class="modal-time"   id="modalTime"></div>
     <button class="btn-dismiss" onclick="dismiss()">Dismiss</button>
   </div>
 </div>
 
 <script>
-// ── Prayer data ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// SECTION A — PRAYER DEFINITIONS
+// ════════════════════════════════════════════════════════
+// Each entry in this array is one prayer row.
+// Fields:
+//   key     → internal ID, must match keys in offsets{} and calcPrayerTimes()
+//   name    → English name
+//   malay   → Malay/local name (shown prominently)
+//   arabic  → Arabic name (shown smaller below)
+//   icon    → emoji shown on the left of each row
+//   sunnah  → true = optional/sunnah prayer (shown with different bg)
+//
+// TO ADD A NEW PRAYER: add an entry here, then add its key
+// to SECTION B (offsets), SECTION C (calculation), and
+// SECTION D (applyOffsets). Also add an offset-row in the HTML.
+
 const PRAYERS = [
-  { key:'fajr',    name:'Fajr',    malay:'Subuh',   arabic:'الفجر',  icon:'🌅' },
-  { key:'dhuhr',   name:'Dhuhr',   malay:'Zohor',   arabic:'الظهر',  icon:'☀️' },
-  { key:'asr',     name:'Asr',     malay:'Asar',    arabic:'العصر',  icon:'🌤️' },
-  { key:'maghrib', name:'Maghrib', malay:'Maghrib', arabic:'المغرب', icon:'🌇' },
-  { key:'isha',    name:'Isha\'',  malay:'Isya\'',  arabic:'العشاء', icon:'🌙' },
+  { key:'fajr',    name:'Fajr',    malay:'Subuh',   arabic:'الفجر',  icon:'🌅', sunnah:false },
+  { key:'dhuha',   name:'Dhuha',   malay:'Dhuha',   arabic:'الضحى',  icon:'🌤️', sunnah:true  },
+  { key:'dhuhr',   name:'Dhuhr',   malay:'Zohor',   arabic:'الظهر',  icon:'☀️', sunnah:false },
+  { key:'asr',     name:'Asr',     malay:'Asar',    arabic:'العصر',  icon:'🌇', sunnah:false },
+  { key:'maghrib', name:'Maghrib', malay:'Maghrib', arabic:'المغرب', icon:'🌆', sunnah:false },
+  { key:'isha',    name:'Isha\'',  malay:'Isya\'',  arabic:'العشاء', icon:'🌙', sunnah:false },
 ];
 
-// Brunei BSB coords
+// ════════════════════════════════════════════════════════
+// SECTION B — LOCATION & OFFSETS
+// ════════════════════════════════════════════════════════
+
+// --- Brunei BSB coordinates ---
+// LAT = latitude (north/south position)
+// LNG = longitude (east/west position)
+// These are used in the astronomical calculation below.
+// If you move to a different city, update these values.
 const LAT = 4.9031;
 const LNG = 114.9398;
 
-// Offsets in minutes (user-adjustable, saved to localStorage)
-let offsets = { fajr: -9, isya: +5 };
+// --- Your personal time corrections (in minutes) ---
+// Positive = later than calculated, Negative = earlier.
+// Example: fajr: -9 means your mosque's Fajr is 9 min earlier
+// than what the formula produces, so we subtract 9 minutes.
+//
+// These default values are loaded first, then overwritten
+// by whatever you last saved using the +/- buttons.
+const DEFAULT_OFFSETS = {
+  fajr:    0,   // Subuh: no correction
+  dhuha:    0,   // Dhuha: no correction by default
+  dhuhr:    0,   // Zohor: no correction
+  asr:      0,   // Asar: no correction
+  maghrib:  0,   // Maghrib: no correction
+  isha:    0,   // Isya': no correction
+};
+
+// Load saved offsets from browser storage (localStorage).
+// If none saved yet, use the defaults above.
+let offsets = { ...DEFAULT_OFFSETS };
 try {
   const saved = JSON.parse(localStorage.getItem('prayerOffsets') || '{}');
-  if (saved.fajr !== undefined) offsets.fajr = saved.fajr;
-  if (saved.isya !== undefined) offsets.isya = saved.isya;
-} catch {}
+  // Only override keys that exist in our defaults (safety check)
+  Object.keys(DEFAULT_OFFSETS).forEach(k => {
+    if (saved[k] !== undefined) offsets[k] = saved[k];
+  });
+} catch(e) {}
 
-let enabled = { fajr:true, dhuhr:true, asr:true, maghrib:true, isha:true };
+// Load which prayers have alarms enabled.
+// All prayers start enabled. User can toggle each one off.
+const DEFAULT_ENABLED = { fajr:true, dhuha:true, dhuhr:true, asr:true, maghrib:true, isha:true };
+let enabled = { ...DEFAULT_ENABLED };
 try {
   const e = JSON.parse(localStorage.getItem('prayerEnabled') || '{}');
   Object.assign(enabled, e);
-} catch {}
+} catch(e) {}
 
-let ringingKey = null;
-let audioCtx = null;
-let chimeTimer = null;
+// State variables
+let ringingKey = null;  // key of the prayer currently ringing (or null)
+let audioCtx   = null;  // Web Audio context for the chime sound
 
-// ── JAKIM Prayer Time Calculation ────────────────────────────
-// Based on Muslim World League with JAKIM's Fajr 20°, Isha 18°
-function toRad(d){ return d * Math.PI / 180; }
-function toDeg(r){ return r * 180 / Math.PI; }
+// ════════════════════════════════════════════════════════
+// SECTION C — PRAYER TIME CALCULATION (JAKIM METHOD)
+// ════════════════════════════════════════════════════════
+// This function takes a JavaScript Date object and returns
+// raw prayer times as "HH:MM" strings.
+//
+// The math uses solar position astronomy:
+//   - Julian Date → how many days since a reference point
+//   - Solar declination → how far the sun is north/south
+//   - Equation of Time → difference between clock noon and solar noon
+//   - Hour angle → how far the sun is from the horizon at a given angle
+//
+// JAKIM angles used:
+//   Fajr  → sun is 20° below horizon (before sunrise)
+//   Isha  → sun is 18° below horizon (after sunset)
+//   Maghrib / Sunrise → sun at -0.8333° (accounts for sun's apparent radius)
+//   Asr → Shafi'i method (shadow = 1x object height)
+
+function toRad(d) { return d * Math.PI / 180; }  // degrees → radians
+function toDeg(r) { return r * 180 / Math.PI; }  // radians → degrees
 
 function calcPrayerTimes(date) {
   const year  = date.getFullYear();
-  const month = date.getMonth() + 1;
+  const month = date.getMonth() + 1;  // JS months are 0-indexed
   const day   = date.getDate();
 
-  // Julian date
-  let JD = 367*year - Math.floor(7*(year+Math.floor((month+9)/12))/4)
-           + Math.floor(275*month/9) + day + 1721013.5;
+  // Step 1: Calculate Julian Date (astronomical day counter)
+  let JD = 367*year
+           - Math.floor(7 * (year + Math.floor((month+9)/12)) / 4)
+           + Math.floor(275*month/9)
+           + day + 1721013.5;
 
+  // Step 2: Days since J2000.0 (Jan 1, 2000 noon)
   const D = JD - 2451545.0;
-  const g = toRad((357.529 + 0.98560028 * D) % 360);
-  const q = (280.459 + 0.98564736 * D) % 360;
-  const L = toRad((q + 1.915*Math.sin(g) + 0.020*Math.sin(2*g)) % 360);
-  const e = toRad(23.439 - 0.00000036*D);
-  const RA = toDeg(Math.atan2(Math.cos(e)*Math.sin(L), Math.cos(L))) / 15;
-  const dec = Math.asin(Math.sin(e)*Math.sin(L));
+
+  // Step 3: Solar position
+  const g = toRad((357.529 + 0.98560028 * D) % 360);  // mean anomaly
+  const q = (280.459 + 0.98564736 * D) % 360;          // mean longitude
+  const L = toRad((q + 1.915*Math.sin(g) + 0.020*Math.sin(2*g)) % 360); // ecliptic longitude
+  const e = toRad(23.439 - 0.00000036 * D);             // obliquity of ecliptic
+
+  // Step 4: Right ascension and declination
+  const RA  = toDeg(Math.atan2(Math.cos(e)*Math.sin(L), Math.cos(L))) / 15;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));  // sun's declination
+
+  // Step 5: Equation of Time (how many hours the sun is early/late)
   const EqT = q/15 - ((RA % 24 + 24) % 24);
 
   const lat = toRad(LAT);
-  const lng = LNG;
-  const tz  = 8; // Brunei UTC+8
+  const tz  = 8;  // Brunei = UTC+8
 
+  // Step 6: Solar transit (when sun is highest, i.e. Dhuhr time)
+  const transit = 12 + tz - LNG/15 - EqT;
+
+  // Step 7: Hour angle function
+  // Given an angle (degrees below horizon), returns hours before/after transit
   function hourAngle(angle) {
     const cosH = (Math.sin(toRad(angle)) - Math.sin(lat)*Math.sin(dec))
                  / (Math.cos(lat)*Math.cos(dec));
-    if (cosH < -1) return 0;
-    if (cosH >  1) return 0;
-    return toDeg(Math.acos(cosH)) / 15;
+    if (cosH < -1) return 0;  // sun never sets (polar day)
+    if (cosH >  1) return 0;  // sun never rises (polar night)
+    return toDeg(Math.acos(cosH)) / 15;  // convert to hours
   }
 
-  const transit = 12 + tz - lng/15 - EqT;
+  // Step 8: Calculate each prayer time
+  const fajrRaw    = transit - hourAngle(-20);       // JAKIM: 20° below horizon
+  const sunriseRaw = transit - hourAngle(-0.8333);   // sunrise (used for Dhuha)
+  const dhuhrRaw   = transit;                         // solar noon
 
-  // JAKIM: Fajr 20°, Isha 18°
-  const fajrRaw    = transit - hourAngle(-20);
-  const sunriseRaw = transit - hourAngle(-0.8333);
-  const dhuhrRaw   = transit;
-  // Asr (Shafi'i shadow factor 1)
-  const cosA = Math.sin(Math.atan(1/( 1 + Math.tan(Math.abs(dec - lat)) )));
-  const asrHA = toDeg(Math.acos((cosA - Math.sin(lat)*Math.sin(dec)) / (Math.cos(lat)*Math.cos(dec)))) / 15;
+  // Asr (Shafi'i): when shadow length = 1x object height
+  const cosA  = Math.sin(Math.atan(1 / (1 + Math.tan(Math.abs(dec - lat)))));
+  const asrHA = toDeg(Math.acos(
+    (cosA - Math.sin(lat)*Math.sin(dec)) / (Math.cos(lat)*Math.cos(dec))
+  )) / 15;
   const asrRaw     = transit + asrHA;
-  const maghribRaw = transit + hourAngle(-0.8333);
-  const ishaRaw    = transit + hourAngle(-18);
 
+  const maghribRaw = transit + hourAngle(-0.8333);   // sunset
+  const ishaRaw    = transit + hourAngle(-18);        // JAKIM: 18° below horizon
+
+  // Dhuha = 20 minutes after sunrise (common sunnah starting point)
+  const dhuhaRaw   = sunriseRaw + (20/60);
+
+  // Step 9: Convert decimal hours → "HH:MM" string
   function toHHMM(h) {
-    const total = Math.round(h * 60);
-    const hh = Math.floor(total / 60) % 24;
-    const mm = total % 60;
+    const total = Math.round(h * 60);           // total minutes
+    const hh    = Math.floor(total / 60) % 24;  // hours (wrap at 24)
+    const mm    = total % 60;                   // minutes
     return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
   }
 
+  // Return all times as HH:MM strings
   return {
     fajr:    toHHMM(fajrRaw),
+    dhuha:   toHHMM(dhuhaRaw),
     dhuhr:   toHHMM(dhuhrRaw),
     asr:     toHHMM(asrRaw),
     maghrib: toHHMM(maghribRaw),
@@ -465,87 +730,131 @@ function calcPrayerTimes(date) {
   };
 }
 
+// ════════════════════════════════════════════════════════
+// SECTION D — OFFSET APPLICATION
+// ════════════════════════════════════════════════════════
+// Takes the raw calculated times and shifts each one
+// by the user's correction in minutes.
+//
+// The shift() helper handles wrapping past midnight.
+// e.g. if calculated Isha is 23:58 and offset is +5,
+// the result is 00:03 the next day (wraps correctly).
+
 function applyOffsets(times) {
+  // Shifts a "HH:MM" string by `mins` minutes (can be negative)
   function shift(hhmm, mins) {
-    const [h,m] = hhmm.split(':').map(Number);
-    const total = h*60 + m + mins;
-    const t2 = ((total % 1440) + 1440) % 1440;
+    const [h, m] = hhmm.split(':').map(Number);
+    const total  = h*60 + m + mins;                   // add offset
+    const t2     = ((total % 1440) + 1440) % 1440;    // wrap around 24h (1440 min/day)
     return `${String(Math.floor(t2/60)).padStart(2,'0')}:${String(t2%60).padStart(2,'0')}`;
   }
+
+  // Apply each prayer's offset. If offset is 0, time is unchanged.
   return {
     fajr:    shift(times.fajr,    offsets.fajr),
-    dhuhr:   times.dhuhr,
-    asr:     times.asr,
-    maghrib: times.maghrib,
-    isha:    shift(times.isha,    offsets.isya),
+    dhuha:   shift(times.dhuha,   offsets.dhuha),
+    dhuhr:   shift(times.dhuhr,   offsets.dhuhr),
+    asr:     shift(times.asr,     offsets.asr),
+    maghrib: shift(times.maghrib, offsets.maghrib),
+    isha:    shift(times.isha,    offsets.isha),
   };
 }
 
-function fmt12(hhmm) {
-  const [h,m] = hhmm.split(':').map(Number);
-  const ap = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return `${h12}:${String(m).padStart(2,'0')} ${ap}`;
-}
+// ════════════════════════════════════════════════════════
+// SECTION E — RENDER FUNCTIONS
+// ════════════════════════════════════════════════════════
+// These functions build the visible HTML from data.
 
-// ── Render ───────────────────────────────────────────────────
-let todayTimes = {};
-let adjustedTimes = {};
+// Stores computed times (updated daily and on offset changes)
+let todayTimes    = {};  // raw calculated times
+let adjustedTimes = {};  // after applying offsets
 
+// Recalculate times for today (called at startup and midnight)
 function computeTimes() {
-  todayTimes   = calcPrayerTimes(new Date());
+  todayTimes    = calcPrayerTimes(new Date());
   adjustedTimes = applyOffsets(todayTimes);
 }
 
+// Helper: current time as total minutes since midnight (e.g. 13:30 → 810)
 function nowMinutes() {
   const n = new Date();
   return n.getHours()*60 + n.getMinutes();
 }
 
+// Helper: convert "HH:MM" string to minutes since midnight
 function timeToMins(hhmm) {
-  const [h,m] = hhmm.split(':').map(Number);
-  return h*60+m;
+  const [h, m] = hhmm.split(':').map(Number);
+  return h*60 + m;
 }
 
+// Helper: convert "HH:MM" (24h) to "H:MM AM/PM" (12h)
+function fmt12(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const ap  = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;   // 0 → 12, 13 → 1, etc.
+  return `${h12}:${String(m).padStart(2,'0')} ${ap}`;
+}
+
+// Draws the full prayer list into #prayerList
+// Called every minute (or when offsets change)
 function renderPrayers() {
   const list = document.getElementById('prayerList');
   const nowM = nowMinutes();
 
-  // Find next prayer
-  let nextKey = null;
+  // Find the next upcoming prayer
+  let nextKey  = null;
   let nextMins = Infinity;
   PRAYERS.forEach(p => {
-    const t = timeToMins(adjustedTimes[p.key]);
-    const diff = (t - nowM + 1440) % 1440;
-    if (diff > 0 && diff < nextMins) { nextMins = diff; nextKey = p.key; }
+    const t    = timeToMins(adjustedTimes[p.key]);
+    const diff = (t - nowM + 1440) % 1440;  // minutes until this prayer (wraps)
+    if (diff > 0 && diff < nextMins) {
+      nextMins = diff;
+      nextKey  = p.key;
+    }
   });
 
+  // Build HTML for each prayer row
   list.innerHTML = PRAYERS.map(p => {
-    const adj = adjustedTimes[p.key];
-    const raw = todayTimes[p.key];
+    const adj    = adjustedTimes[p.key];
+    const raw    = todayTimes[p.key];
     const isNext = p.key === nextKey;
     const isPast = !isNext && timeToMins(adj) < nowM;
     const isRing = p.key === ringingKey;
 
+    // Show offset note only if this prayer has a non-zero correction
     let offsetNote = '';
-    if (p.key === 'fajr') {
-      const sign = offsets.fajr >= 0 ? '+' : '';
-      offsetNote = `Calculated: ${fmt12(raw)} · Adjusted: ${sign}${offsets.fajr} min`;
-    } else if (p.key === 'isha') {
-      const sign = offsets.isya >= 0 ? '+' : '';
-      offsetNote = `Calculated: ${fmt12(raw)} · Adjusted: ${sign}${offsets.isya} min`;
+    if (offsets[p.key] !== 0) {
+      const sign = offsets[p.key] >= 0 ? '+' : '';
+      offsetNote = `Calc: ${fmt12(raw)} · ${sign}${offsets[p.key]} min`;
     }
 
+    // Sunnah label badge
+    const sunnahBadge = p.sunnah
+      ? `<span style="font-size:0.65rem;background:rgba(37,176,158,0.15);
+           color:var(--teal2);padding:1px 5px;border-radius:4px;margin-left:4px;">
+           sunnah</span>`
+      : '';
+
     return `
-    <div class="prayer-row ${isNext?'is-next':''} ${isPast?'is-past':''} ${isRing?'ringing':''}">
+    <div class="prayer-row
+      ${isNext   ? 'is-next' : ''}
+      ${isPast   ? 'is-past' : ''}
+      ${isRing   ? 'ringing' : ''}
+      ${p.sunnah ? 'sunnah'  : ''}">
       <div class="p-icon">${p.icon}</div>
       <div class="p-info">
-        <div class="p-name">${p.malay} <span style="color:var(--dim);font-size:0.8em">${p.name}</span></div>
+        <div class="p-name">
+          ${p.malay}${sunnahBadge}
+          <span style="color:var(--dim);font-size:0.8em"> ${p.name}</span>
+        </div>
         <div class="p-arabic">${p.arabic}</div>
         ${offsetNote ? `<div class="p-offset">${offsetNote}</div>` : ''}
       </div>
-      <label class="tog" title="${enabled[p.key]?'Alarm on':'Alarm off'}">
-        <input type="checkbox" ${enabled[p.key]?'checked':''} onchange="togglePrayer('${p.key}',this.checked)">
+      <!-- Toggle switch: calls togglePrayer() when flipped -->
+      <label class="tog" title="${enabled[p.key] ? 'Alarm on' : 'Alarm off'}">
+        <input type="checkbox"
+          ${enabled[p.key] ? 'checked' : ''}
+          onchange="togglePrayer('${p.key}', this.checked)">
         <div class="tog-track"></div>
         <div class="tog-thumb"></div>
       </label>
@@ -553,47 +862,58 @@ function renderPrayers() {
     </div>`;
   }).join('');
 
-  // Next pill
+  // Update the "Next: X in Yh Zm" pill inside the clock card
   if (nextKey) {
-    const p = PRAYERS.find(x => x.key === nextKey);
-    const h = Math.floor(nextMins/60);
-    const m = nextMins%60;
-    const countStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
-    document.getElementById('nextName').textContent = `${p.icon} ${p.malay}`;
+    const p       = PRAYERS.find(x => x.key === nextKey);
+    const hrs     = Math.floor(nextMins / 60);
+    const mins    = nextMins % 60;
+    const countStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    document.getElementById('nextName').textContent      = `${p.icon} ${p.malay}`;
     document.getElementById('nextCountdown').textContent = `in ${countStr}`;
   } else {
-    document.getElementById('nextName').textContent = 'All done for today';
+    document.getElementById('nextName').textContent      = 'All done for today';
     document.getElementById('nextCountdown').textContent = '';
   }
 }
 
+// Updates the offset panel: fills in the current values and
+// shows "Calculated: X → Adjusted: Y" notes for each prayer
 function renderOffsets() {
-  const fSign = offsets.fajr >= 0 ? '+' : '';
-  const iSign = offsets.isya >= 0 ? '+' : '';
-  document.getElementById('fajrVal').textContent = `${fSign}${offsets.fajr} min`;
-  document.getElementById('isyaVal').textContent = `${iSign}${offsets.isya} min`;
-  document.getElementById('fajrNote').textContent =
-    `Calculated: ${fmt12(todayTimes.fajr)} → ${fmt12(adjustedTimes.fajr)}`;
-  document.getElementById('isyaNote').textContent =
-    `Calculated: ${fmt12(todayTimes.isha)} → ${fmt12(adjustedTimes.isha)}`;
+  PRAYERS.forEach(p => {
+    const k    = p.key;
+    const sign = offsets[k] >= 0 ? '+' : '';
+    const valEl  = document.getElementById(`${k}Val`);
+    const noteEl = document.getElementById(`${k}Note`);
+    if (valEl)  valEl.textContent  = `${sign}${offsets[k]} min`;
+    if (noteEl) noteEl.textContent =
+      `Calc: ${fmt12(todayTimes[k])} → ${fmt12(adjustedTimes[k])}`;
+  });
 }
 
-// ── Clock ────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// SECTION F — CLOCK & ALARM TRIGGER
+// ════════════════════════════════════════════════════════
+// tick() runs every second via setInterval.
+// It updates the clock display and checks if an alarm should fire.
+
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-let lastCheckedMinute = -1;
-let lastCheckedDate   = '';
+
+let lastCheckedMinute = -1;  // tracks the last minute we checked alarms
+let lastCheckedDate   = '';  // tracks the current date (to recalc at midnight)
 
 function tick() {
   const now = new Date();
-  const h = String(now.getHours()).padStart(2,'0');
-  const m = String(now.getMinutes()).padStart(2,'0');
-  const s = String(now.getSeconds()).padStart(2,'0');
+  const h   = String(now.getHours()).padStart(2,'0');
+  const m   = String(now.getMinutes()).padStart(2,'0');
+  const s   = String(now.getSeconds()).padStart(2,'0');
+
+  // Update clock display
   document.getElementById('clockTime').textContent = `${h}:${m}:${s}`;
   document.getElementById('clockDate').textContent =
     `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
 
-  // Recalculate at midnight
+  // At midnight: recalculate prayer times for the new day
   const dateStr = now.toDateString();
   if (dateStr !== lastCheckedDate) {
     lastCheckedDate = dateStr;
@@ -602,17 +922,21 @@ function tick() {
     renderOffsets();
   }
 
-  // Check alarms every new minute
+  // Every new minute: re-render the list (updates next/past highlighting)
+  // and check if any alarm should fire
   const minNow = now.getHours()*60 + now.getMinutes();
-  if (s === '00' || (minNow !== lastCheckedMinute)) {
+  if (minNow !== lastCheckedMinute) {
     lastCheckedMinute = minNow;
-    renderPrayers(); // refresh next/past highlights
+    renderPrayers();
+
+    // Only trigger one alarm at a time (if none currently ringing)
     if (ringingKey === null) {
       PRAYERS.forEach(p => {
-        if (!enabled[p.key]) return;
+        if (!enabled[p.key]) return;  // skip disabled alarms
         const t = adjustedTimes[p.key];
         if (!t) return;
         const [ph, pm] = t.split(':').map(Number);
+        // Fire if hour and minute match, and we're in the first 30 seconds
         if (ph === now.getHours() && pm === now.getMinutes() && now.getSeconds() < 30) {
           triggerAlarm(p);
         }
@@ -621,57 +945,78 @@ function tick() {
   }
 }
 
-// ── Alarm ────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// SECTION G — ALARM (chime + modal popup)
+// ════════════════════════════════════════════════════════
+
+// Shows the modal and starts the chime for a given prayer
 function triggerAlarm(prayer) {
   ringingKey = prayer.key;
+  // Fill in the modal content
   document.getElementById('modalIcon').textContent   = prayer.icon;
-  document.getElementById('modalPrayer').textContent  = prayer.malay;
-  document.getElementById('modalArabic').textContent  = prayer.arabic;
-  document.getElementById('modalTime').textContent    =
+  document.getElementById('modalPrayer').textContent = prayer.malay;
+  document.getElementById('modalArabic').textContent = prayer.arabic;
+  document.getElementById('modalTime').textContent   =
     `${fmt12(adjustedTimes[prayer.key])} · Prayer time`;
+  // Show the modal
   document.getElementById('modal').classList.add('show');
-  renderPrayers();
+  renderPrayers();  // makes the ringing row pulse
   playChime();
 }
 
+// Called when user taps Dismiss
 function dismiss() {
   ringingKey = null;
   document.getElementById('modal').classList.remove('show');
   stopChime();
-  renderPrayers();
+  renderPrayers();  // removes the ringing pulse
 }
 
+// Creates and plays a synthesized chime using Web Audio API.
+// No audio files needed — the browser generates the sound.
 function playChime() {
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     scheduleChime();
-  } catch(e) {}
+  } catch(e) {
+    console.warn('Audio not available:', e);
+  }
 }
 
+// Schedules repeating chime notes using the Web Audio scheduler.
+// Notes: C5 E5 G5 C6 — a gentle ascending chord (C major)
+// Frequencies in Hz: 523=C, 659=E, 784=G, 1047=C(octave)
 function scheduleChime() {
   if (!audioCtx) return;
-  // Gentle ascending chime: C-E-G-C (octave)
   const notes = [523.25, 659.25, 783.99, 1046.50];
   let t = audioCtx.currentTime;
+
   const loop = () => {
     notes.forEach((freq, i) => {
-      const osc = audioCtx.createOscillator();
-      const env = audioCtx.createGain();
-      osc.type = 'sine';
+      const osc = audioCtx.createOscillator();  // generates the tone
+      const env = audioCtx.createGain();         // controls volume envelope
+
+      osc.type = 'sine';          // sine = smooth, bell-like sound
       osc.frequency.value = freq;
-      env.gain.setValueAtTime(0, t + i*0.4);
-      env.gain.linearRampToValueAtTime(0.22, t + i*0.4 + 0.06);
-      env.gain.exponentialRampToValueAtTime(0.001, t + i*0.4 + 0.8);
+
+      // Volume envelope: silence → peak → fade out
+      env.gain.setValueAtTime(0,    t + i*0.4);         // start silent
+      env.gain.linearRampToValueAtTime(0.22, t + i*0.4 + 0.06);  // quick attack
+      env.gain.exponentialRampToValueAtTime(0.001, t + i*0.4 + 0.8); // slow decay
+
       osc.connect(env);
       env.connect(audioCtx.destination);
       osc.start(t + i*0.4);
       osc.stop(t + i*0.4 + 0.9);
     });
-    t += notes.length*0.4 + 1.2;
+    t += notes.length*0.4 + 1.2;  // space between repetitions
   };
-  for (let i = 0; i < 30; i++) loop(); // ~3 min of chimes
+
+  // Schedule 30 repetitions (~3 minutes of chiming)
+  for (let i = 0; i < 30; i++) loop();
 }
 
+// Stops the chime by closing the audio context
 function stopChime() {
   if (audioCtx) {
     try { audioCtx.close(); } catch(e) {}
@@ -679,28 +1024,43 @@ function stopChime() {
   }
 }
 
-// ── Controls ─────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════
+// SECTION H — USER CONTROL HANDLERS
+// ════════════════════════════════════════════════════════
+
+// Called when a toggle switch is flipped for a prayer
+// key = prayer key (e.g. 'fajr'), val = true/false
 function togglePrayer(key, val) {
   enabled[key] = val;
-  try { localStorage.setItem('prayerEnabled', JSON.stringify(enabled)); } catch {}
+  // Save to browser so it persists after refresh
+  try { localStorage.setItem('prayerEnabled', JSON.stringify(enabled)); } catch(e) {}
   renderPrayers();
 }
 
+// Called by the − and + buttons in the offset panel
+// which = prayer key (e.g. 'dhuhr'), delta = +1 or -1
 function changeOffset(which, delta) {
-  if (which === 'fajr') offsets.fajr = Math.max(-30, Math.min(30, offsets.fajr + delta));
-  else                  offsets.isya = Math.max(-30, Math.min(30, offsets.isya + delta));
-  try { localStorage.setItem('prayerOffsets', JSON.stringify(offsets)); } catch {}
+  // Clamp to a reasonable range: -30 to +30 minutes
+  offsets[which] = Math.max(-30, Math.min(30, offsets[which] + delta));
+  // Save updated offsets to browser storage
+  try { localStorage.setItem('prayerOffsets', JSON.stringify(offsets)); } catch(e) {}
+  // Recalculate adjusted times and refresh the UI
   adjustedTimes = applyOffsets(todayTimes);
   renderOffsets();
   renderPrayers();
 }
 
-// ── Init ─────────────────────────────────────────────────────
-computeTimes();
-renderPrayers();
-renderOffsets();
-setInterval(tick, 1000);
-tick();
+// ════════════════════════════════════════════════════════
+// SECTION I — INITIALISATION
+// ════════════════════════════════════════════════════════
+// This runs once when the page loads.
+
+computeTimes();   // calculate today's prayer times
+renderPrayers();  // draw the prayer list
+renderOffsets();  // fill the settings panel
+
+setInterval(tick, 1000);  // run tick() every second
+tick();                   // run once immediately (don't wait 1s)
 </script>
 </body>
 </html>
